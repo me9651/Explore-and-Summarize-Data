@@ -1,16 +1,12 @@
-TITLE by YOUR_NAME_HERE
+Explore and Summarize Prosper Loan Data by Michael Erickson
 ========================================================
+Prosper is a peer-to-peer lending company, where individuals can invest in
+personal loans and request to borrow money 
+\([Wikipedia](https://en.wikipedia.org/wiki/Prosper_Marketplace)\). The data set
+contains nearly 114,000 observations of loans with extensive information about
+each loan, including payment information.
 
-> **Tip**: You will see quoted sections like this throughout the template to
-help you construct your report. Make sure that you remove these notes before
-you finish and submit your project!
-
-> **Tip**: One of the requirements of this project is that your code follows
-good formatting techniques, including limiting your lines to 80 characters or
-less. If you're using RStudio, go into Preferences \> Code \> Display to set up
-a margin line to help you keep track of this guideline!
-
-```{r echo=FALSE, message=FALSE, warning=FALSE, packages}
+```{r Load Packages, echo=FALSE, message=FALSE, warning=FALSE}
 # Load all of the packages that you end up using in your analysis in this code
 # chunk.
 
@@ -24,57 +20,270 @@ a margin line to help you keep track of this guideline!
 # want it to. This will clean up the flow of your report.
 
 library(ggplot2)
+library(dplyr)
+library(gridExtra)
+library(maps)
+library(viridis)
 ```
 
-```{r echo=FALSE, Load_the_Data}
+```{r Load Data, echo=FALSE}
 # Load the Data
-
+loans <- read.csv('prosperLoanData.csv')
 ```
 
-> **Tip**: Before you create any plots, it is a good idea to provide a short
-introduction into the dataset that you are planning to explore. Replace this
-quoted text with that general information!
-
-# Univariate Plots Section
-
-> **Tip**: In this section, you should perform some preliminary exploration of
-your dataset. Run some summaries of the data and create univariate plots to
-understand the structure of the individual variables in your dataset. Don't
-forget to add a comment after each plot or closely-related group of plots!
-There should be multiple code chunks and text sections; the first one below is
-just to help you get started.
-
-```{r echo=FALSE, Univariate_Plots}
-
+#Data Transformation
+Twenty-one values for ListingCategory are stored as integers 0 to 20. These are 
+converted to Factors with labels indicating their use.
+```{r Listing Category Factor, echo=TRUE}
+# Transform ListingCategory to a Factor
+loans$ListingCategory <- factor(loans$ListingCategory..numeric.,
+                                labels = c("Not Available",
+  "Debt Consolidation", "Home Improvement", "Business", "Personal Loan",
+  "Student Use", "Auto", "Other", "Baby&Adoption", "Boat", "Cosmetic Procedure",
+  "Engagement Ring", "Green Loans", "Household Expenses", "Large Purchases",
+  "Medical/Dental", "Motorcycle", "RV", "Taxes", "Vacation", "Wedding Loans"))
 ```
 
-> **Tip**: Make sure that you leave a blank line between the start / end of
-each code block and the end / start of your Markdown text so that it is
-formatted nicely in the knitted text. Note as well that text on consecutive
-lines is treated as a single space. Make sure you have a blank line between
-your paragraphs so that they too are formatted for easy readability.
+To facilitate plotting and filtering outlying Loan Amounts, a boolean is added
+indicating if the Amount is greater than third quartile plus 1.5 times the
+interquartile range (IQR) or lower than first quartile minus 1.5 times the IQR.
+```{r Transform Data, echo=TRUE}
+#Add Outlier for High loan amounts
+loans$LoanOriginalAmount.outlier.high <-
+  (loans$LoanOriginalAmount > quantile(loans$LoanOriginalAmount, .75)
+    + 1.50*IQR(loans$LoanOriginalAmount))
+
+#Add Outlier for Low loan amounts
+loans$LoanOriginalAmount.outlier.low <-
+  (loans$LoanOriginalAmount < quantile(loans$LoanOriginalAmount, .25)
+    - 1.50*IQR(loans$LoanOriginalAmount))
+```
+
+# Univariate Plots
+### Loan Status
+```{r Loan Status, echo=FALSE}
+
+# Plot Listings by Loan Status
+ggplot(loans, aes(x=loans$LoanStatus)) +
+  geom_bar() +
+  theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.4)) +
+  labs(title='Loan Status',
+       x=NULL,
+       y='Number of Listings')
+```
+
+Most loans appear to be current in their payments or to sucessfully complete. 
+It would be interesting to explore correlation between Chargedoff / Defaulted 
+loans and ProsperRating or ProsperScore (the Prosper evaluation of a borrower's 
+credit worthiness).
+
+### Listing Category
+```{r Listing Category, echo=FALSE}
+#Plot percent of listings by Category
+ggplot(loans, aes(x=loans$ListingCategory, y=..count../n, n=nrow(loans))) +
+  geom_bar() +
+  scale_y_continuous(labels = scales::percent) +
+  theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.4)) +
+  labs(title='Listing Category',
+       x=NULL,
+       y='Percent of Listings')
+```
+
+Debt consolidation is the predominant reason on Prosper for borrowing money. 
+Over half of all listings are for Debt Consolidation. I would like to explore 
+listing category against borrower income to determine if different levels of 
+income tend to borrow for different reasons.
+
+### Income Range
+```{r Income Range, echo=FALSE}
+#Plot percent of listings by income level
+ggplot(loans, aes(x=loans$IncomeRange, y=..count../n, n=nrow(loans))) +
+  geom_bar() +
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_discrete(limits=c('Not displayed', 'Not employed', '$0', '$1-24,999',
+                            '$25,000-49,999', '$50,000-74,999',
+                            '$75,000-99,999', '$100,000+')) +
+  theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.4)) +
+  labs(title='Income Levels of Listings',
+       x=NULL,
+       y='Percent of Listings')
+```
+
+Prosper borrowers appear to be significantly more affluent than the general 
+population of the U.S.
+|     Bracket    | Prosper | United States |
+|:--------------:|:-------:|:-------------:|
+| Less than $25K |      6% |           35% |
+| $25K to $50K   |     28% |           36% |
+| $50K to $75K   |     27% |           16% |
+| $75K to $100K  |     15% |            6% |
+| Over $100K     |     15% |            7% |
+(Prosper values exclude borrowers with income not displayed, who are unemployed, 
+or who have no income. United States values are for people aged 25-64 with income.)
+
+Prosper borrowers could be older and likely to earn more. Prosper borrowers are 
+certainly self-selecting as the type of person who would take a loan out through 
+an online lender. Prosper's lending requirements could also bias to more affluent 
+borrowers.
+
+Reference: [Personal Income in the United States](https://en.wikipedia.org/wiki/Personal_income_in_the_United_States#Income_distribution)
+
+### Loan Amount
+```{r Loan Amount, echo=FALSE}
+
+#boxplot of LoanOriginalamount
+n1 <- 
+  ggplot(loans, aes(x='', y=LoanOriginalAmount)) +
+    geom_boxplot(outlier.shape=NA) +
+    geom_jitter(data=dplyr::filter(loans,
+      LoanOriginalAmount.outlier.high == TRUE 
+      | LoanOriginalAmount.outlier.low == TRUE),
+      color='red', width=0.1, alpha=0.1) +
+    labs(title='Box Plot of LoanOriginalAmount',
+         x=NULL,
+         y='LoanOriginalAmount')
+
+#histogram of LoanOriginalamount
+n2 <-
+  qplot(loans$LoanOriginalAmount,
+        geom='histogram',
+        binwidth=1000,
+        col=I('white'),
+        main='Histogram of LoanOriginalAmount',
+        xlab='Loan Amount')  
+
+#tabular data of loan amount frequency divisible by 10s, 100s, 1000s, 10000s
+n3 <- tibble('Divisor'=integer(),
+             'Distinct_Values'=integer(),
+             'Number_of_Loans'=integer())
+
+for (i in 1:4) { #powers of 10 math and summary
+  loans %>%
+  filter(LoanOriginalAmount%%(10^i) == 0) %>%
+  summarize(sum=sum(n()), count=n_distinct(LoanOriginalAmount)) %>%
+  {add_row(n3, 'Divisor' = (10^i),
+                          'Distinct_Values'= .$count,
+                          'Number_of_Loans' = .$sum)} -> n3
+}
+
+
+#histogram of last digit of loan amount
+n4 <-
+  qplot(loans$LoanOriginalAmount%%10,
+      geom='histogram',
+      binwidth=1,
+      col=I('white'),
+      main='Histogram of Last Digit',
+      xlab='Last Digit')
+
+
+#place in grid
+grid.arrange(n1, n2, tableGrob(n3), n4, ncol=2)
+
+
+#cleanup
+rm(n1, n2, n3, i, n4)
+```
+
+#### Loan Amount Summary Statistics
+```{r Loan Amount 2, echo=FALSE}
+summary(loans$LoanOriginalAmount)
+```
+
+```{r Loan Amount 3, echo=FALSE}
+
+loans %>%
+  count(LoanOriginalAmount) %>%
+  arrange(desc(n)) %>%
+  mutate(pct=n/sum(n)) %>%
+  head(10)
+```
+
+Prosper currently offers loans between $2,000 and $40,000. This data set appears 
+to have data before that change was implemented, as loans in the set are bounded 
+$1,000-$35,000. There is bias towards "large, round" loan amounts, indicating 
+borrowers tend to select an amount near what they need rather than precisely. 
+About 74% (84,000 loans of 114,000 total loans) of loans are a multiple of 
+thousands.
+
+$4,000 is the most commonly borrowed amount. I'm curious if the amount is also 
+associated with a specific type of purchase (other than debt consolidation). 
+$15,000 and $10,000 are also frequently occuring amounts. These top three account 
+for one-third of all loans, and the top 10 loan amounts account for 61%.
+
+Loan amounts skew right, which is typical of a personal income distribution, and 
+I would expect loan amount to have a positive correlation with borrower income.
+
+### Loan Amounts by State
+```{r Loan Amount by State, echo=FALSE}
+
+#summarize average loan amount by state
+avg_loan_by_state <-
+loans %>%
+  group_by(BorrowerState) %>%
+  summarize(n=n(), loan_amount=sum(LoanOriginalAmount)) %>%
+  mutate(state_name = tolower(state.name[match(BorrowerState, state.abb)]),
+         amount = loan_amount/n)
+
+#load us state map data
+us <- map_data('state')
+
+#plot us map with average loan amounts
+ggplot() +
+  geom_blank(data=us, aes(long, lat)) +
+  geom_map(data=us, map=us, aes(map_id=region),
+           fill='black', color='black', size=0.01) +
+  geom_map(data=avg_loan_by_state, map=us,
+           aes(fill=amount, map_id=state_name), 
+           color='grey40', size=0.01) +
+  coord_map('polyconic') +
+  labs(x=NULL, y=NULL, title='Average Loan Amount by State') +
+  theme(panel.border = element_blank(),
+        panel.background = element_blank(),
+        axis.ticks   = element_blank(),
+        axis.text    = element_blank()) +
+  scale_fill_viridis(name='Amount', option='inferno',
+                     label=scales::dollar)
+
+#cleanup
+rm(us, avg_loan_by_state)
+```
+
+I would expect that average loan amount and median income by state would be
+positively correlated. This is the case in some states, such as California,
+Texas,and much of the northeast, but does not hold true in many other areas.
+
+For instance, North Dakota has a relatively high median income, but
+comparatively low average loan value. Conversely, Louisiana has median income
+comparable to other gulf states, but higher average loan values.
+
+This comparison is not rigorous, and I don't expect to dig in to it further in 
+this analysis, but it is an interesting map.
+
+Reference: [Census: Median household income, 2012-2016](https://www.census.gov/quickfacts/fact/map/US/INC110216)
 
 # Univariate Analysis
+For each plot above, I provided interesting findings about variables I explored. 
+Here, I discuss what I initially intend to explore further:
+- relationship between Prosper rating / score of creditworthiness and the \
+default rate 
+- reason for borrowing money against borrower income level; are reasons \
+consistent or varied?
+- loan amount vs. income
 
-> **Tip**: Now that you've completed your univariate explorations, it's time to
-reflect on and summarize what you've found. Use the questions below to help you
-gather your observations and add your own if you have other thoughts!
+The Prosper data set is well-structured with loan observations on each row and 
+many interesting variables in columns. There is enough information to determine 
+if data Prosper collects is sufficient to determine credit risk and how
+predictive Prosper's model is of repayment.
 
-### What is the structure of your dataset?
+I performed slight cleanup on the data to:
+- convert loan listing categories from numeric to string factors
+- add informational boolean values to high and low loan value outliers
 
-### What is/are the main feature(s) of interest in your dataset?
-
-### What other features in the dataset do you think will help support your \
-investigation into your feature(s) of interest?
-
-### Did you create any new variables from existing variables in the dataset?
-
-### Of the features you investigated, were there any unusual distributions? \
-Did you perform any operations on the data to tidy, adjust, or change the form \
-of the data? If so, why did you do this?
+Other than the above, I performed no adjustment to underlying data values.
 
 
-# Bivariate Plots Section
+# Bivariate Plots
 
 > **Tip**: Based on what you saw in the univariate plots, what relationships
 between variables might be interesting to look at in this section? Don't limit
