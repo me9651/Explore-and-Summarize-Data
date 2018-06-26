@@ -48,15 +48,23 @@ To facilitate plotting and filtering outlying Loan Amounts, a boolean is added
 indicating if the Amount is greater than third quartile plus 1.5 times the
 interquartile range (IQR) or lower than first quartile minus 1.5 times the IQR.
 ```{r Transform Data, echo=TRUE}
-#Add Outlier for High loan amounts
+# Add Outlier for High loan amounts
 loans$LoanOriginalAmount.outlier.high <-
   (loans$LoanOriginalAmount > quantile(loans$LoanOriginalAmount, .75)
     + 1.50*IQR(loans$LoanOriginalAmount))
 
-#Add Outlier for Low loan amounts
+# Add Outlier for Low loan amounts
 loans$LoanOriginalAmount.outlier.low <-
   (loans$LoanOriginalAmount < quantile(loans$LoanOriginalAmount, .25)
     - 1.50*IQR(loans$LoanOriginalAmount))
+```
+
+Handle ListingCreationDate as a POSIX datetime to simplify calculations.
+```{r}
+
+loans$ListingCreationDate.dt <- as.POSIXct(loans$ListingCreationDate,
+                                           format='%Y-%m-%d %H:%M:%S')
+
 ```
 
 # Univariate Plots
@@ -277,8 +285,9 @@ if data Prosper collects is sufficient to determine credit risk and how
 predictive Prosper's model is of repayment.
 
 I performed slight cleanup on the data to:
-- convert loan listing categories from numeric to string factors
-- add informational boolean values to high and low loan value outliers
+- convert loan listing categories from numeric to string factors.
+- add informational boolean values to high and low loan value outliers.
+- simplify handling of datetimes.
 
 Other than the above, I performed no adjustment to underlying data values.
 
@@ -291,7 +300,60 @@ yourself to relationships between a main output feature and one of the
 supporting variables. Try to look at relationships between supporting variables
 as well.
 
-```{r echo=FALSE, Bivariate_Plots}
+### Loan Amount by Income Range
+```{r Loan Amount by Income Range, echo=FALSE}
+ggplot(loans, aes(x=IncomeRange, y=LoanOriginalAmount)) +
+  geom_boxplot() +
+  scale_x_discrete(limits=c('Not displayed', 'Not employed', '$0', '$1-24,999',
+                          '$25,000-49,999', '$50,000-74,999',
+                          '$75,000-99,999', '$100,000+')) +
+  scale_y_continuous(labels = scales::dollar) +  
+  theme(axis.text.x=element_text(size=10, angle=30, hjust=1, vjust=1)) +
+  labs(title='Histogram of Loan Amount by Income Range',
+       x='Income Range',
+       y='Loan Amount')
+
+```
+
+### Prosper Rating by Income Range
+```{r Prosper Rating by Income Range, echo=FALSE}
+loans %>%
+  filter(ListingCreationDate.dt >= as.POSIXct('2009-07-01',
+                                              tz='UTC',
+                                              format='%Y-%m-%d')) %>%
+ggplot(., aes(x=IncomeRange)) +
+  geom_bar(aes(fill=ProsperRating..Alpha.)) +
+  scale_x_discrete(limits=c('Not displayed', 'Not employed', '$0', '$1-24,999',
+                          '$25,000-49,999', '$50,000-74,999',
+                          '$75,000-99,999', '$100,000+')) +
+  theme(axis.text.x=element_text(size=10, angle=30, hjust=1, vjust=1)) +
+  scale_fill_viridis(discrete=TRUE, direction=-1) +
+  labs(title='Count of Prosper Ratings by Income Range',
+       x='Income Range',
+       y='Count',
+       fill='Prosper Rating')
+
+```
+
+
+### Default Rates by Prosper Rating
+```{r Default Rates by Rating, echo=FALSE}
+loans %>%
+  mutate(month=format(ListingCreationDate.dt, '%m'),
+         year=format(ListingCreationDate.dt, '%Y'),
+         yearmonth=as.integer(format(ListingCreationDate.dt, '%Y%m'))) %>%
+  mutate(post200907 = ifelse(yearmonth>=200907, TRUE, FALSE)) %>%
+  group_by(post200907) %>%
+  summarize(n=n())
+
+loans %>%
+  mutate(month=format(ListingCreationDate.dt, '%m'),
+         year=format(ListingCreationDate.dt, '%Y'),
+         yearmonth=as.integer(format(ListingCreationDate.dt, '%Y%m'))) %>%
+  mutate(post200907 = ifelse(yearmonth>=200907, TRUE, FALSE)) %>%
+  group_by(yearmonth, ProsperScore) %>%
+  summarize(n=n())  
+
 
 ```
 
