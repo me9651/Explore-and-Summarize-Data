@@ -24,6 +24,7 @@ library(dplyr)
 library(gridExtra)
 library(maps)
 library(viridis)
+library(GGally)
 ```
 
 ```{r Load Data, echo=FALSE}
@@ -32,6 +33,14 @@ loans <- read.csv('prosperLoanData.csv')
 ```
 
 #Data Transformation
+Remove extraneous characters from variable names.
+```{r Rename Variables, echo=TRUE}
+# remove extraneous characters from variable names
+loans <- rename(loans,
+                'ProsperRatingAlpha' = 'ProsperRating..Alpha.',
+                'ProsperRatingNumeric' = 'ProsperRating..numeric.')
+```
+
 Twenty-one values for ListingCategory are stored as integers 0 to 20. These are 
 converted to Factors with labels indicating their use.
 ```{r Listing Category Factor, echo=TRUE}
@@ -47,7 +56,7 @@ loans$ListingCategory <- factor(loans$ListingCategory..numeric.,
 To facilitate plotting and filtering outlying Loan Amounts, a boolean is added
 indicating if the Amount is greater than third quartile plus 1.5 times the
 interquartile range (IQR) or lower than first quartile minus 1.5 times the IQR.
-```{r Transform Data, echo=TRUE}
+```{r Outliers, echo=TRUE}
 # Add Outlier for High loan amounts
 loans$LoanOriginalAmount.outlier.high <-
   (loans$LoanOriginalAmount > quantile(loans$LoanOriginalAmount, .75)
@@ -60,11 +69,33 @@ loans$LoanOriginalAmount.outlier.low <-
 ```
 
 Handle ListingCreationDate as a POSIX datetime to simplify calculations.
-```{r}
-
+```{r Listing Creation Date, echo=TRUE}
 loans$ListingCreationDate.dt <- as.POSIXct(loans$ListingCreationDate,
                                            format='%Y-%m-%d %H:%M:%S')
+```
 
+Order Factors in logical order for display in plots.
+```{r Order Factors, echo=TRUE}
+# Order ProsperRating high to low
+loans$ProsperRatingAlpha <-
+  factor(loans$ProsperRatingAlpha,
+         levels=c('AA', 'A', 'B', 'C', 'D', 'E', 'HR', 'NC', ''))
+
+# Order IncomeRange low to high
+loans$IncomeRange <-
+  factor(loans$IncomeRange,
+       levels=c('Not displayed', 'Not employed', '$0', '$1-24,999',
+                        '$25,000-49,999', '$50,000-74,999',
+                        '$75,000-99,999', '$100,000+'))
+
+# Order LoanStatus by groups
+loans$LoanStatus <-
+  factor(loans$LoanStatus,
+         levels=c('Cancelled', 'Completed', 'Current', 'FinalPaymentInProgress',
+                  'Chargedoff', 'Defaulted', 'Past Due (1-15 days)',
+                  'Past Due (16-30 days)', 'Past Due (31-60 days)',
+                  'Past Due (61-90 days)', 'Past Due (91-120 days)',
+                  'Past Due (>120 days)'))
 ```
 
 # Univariate Plots
@@ -108,9 +139,6 @@ income tend to borrow for different reasons.
 ggplot(loans, aes(x=loans$IncomeRange, y=..count../n, n=nrow(loans))) +
   geom_bar() +
   scale_y_continuous(labels = scales::percent) +
-  scale_x_discrete(limits=c('Not displayed', 'Not employed', '$0', '$1-24,999',
-                            '$25,000-49,999', '$50,000-74,999',
-                            '$75,000-99,999', '$100,000+')) +
   theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.4)) +
   labs(title='Income Levels of Listings',
        x=NULL,
@@ -222,8 +250,8 @@ for one-third of all loans, and the top 10 loan amounts account for 61%.
 Loan amounts skew right, which is typical of a personal income distribution, and 
 I would expect loan amount to have a positive correlation with borrower income.
 
-### Loan Amounts by State
-```{r Loan Amount by State, echo=FALSE}
+### Median Loan Amount by State
+```{r Median Loan Amount by State, echo=FALSE}
 
 #summarize average loan amount by state
 avg_loan_by_state <-
@@ -245,7 +273,7 @@ ggplot() +
            aes(fill=amount, map_id=state_name), 
            color='grey40', size=0.01) +
   coord_map('polyconic') +
-  labs(x=NULL, y=NULL, title='Average Loan Amount by State') +
+  labs(x=NULL, y=NULL, title='Median Loan Amount by State') +
   theme(panel.border = element_blank(),
         panel.background = element_blank(),
         axis.ticks   = element_blank(),
@@ -288,25 +316,30 @@ I performed slight cleanup on the data to:
 - convert loan listing categories from numeric to string factors.
 - add informational boolean values to high and low loan value outliers.
 - simplify handling of datetimes.
+- simplify column names.
 
 Other than the above, I performed no adjustment to underlying data values.
 
 
 # Bivariate Plots
 
-> **Tip**: Based on what you saw in the univariate plots, what relationships
-between variables might be interesting to look at in this section? Don't limit
-yourself to relationships between a main output feature and one of the
-supporting variables. Try to look at relationships between supporting variables
-as well.
+### Correlation Matrix
+```{r}
+loans %>%
+  select(LoanOriginalAmount, Term, BorrowerAPR, EstimatedReturn,
+         ProsperRatingNumeric, CreditScoreRangeUpper, RevolvingCreditBalance,
+         AvailableBankcardCredit, DebtToIncomeRatio, BankcardUtilization,
+         StatedMonthlyIncome, MonthlyLoanPayment, Recommendations,
+         Investors, PercentFunded, InvestmentFromFriendsCount,
+         InvestmentFromFriendsAmount) %>%
+  ggcorr(., layout.exp=4, hjust=.95, size=3) +
+  labs(title='Correlation Matrix of Selected Variables')
+```
 
 ### Loan Amount by Income Range
 ```{r Loan Amount by Income Range, echo=FALSE}
 ggplot(loans, aes(x=IncomeRange, y=LoanOriginalAmount)) +
   geom_boxplot() +
-  scale_x_discrete(limits=c('Not displayed', 'Not employed', '$0', '$1-24,999',
-                          '$25,000-49,999', '$50,000-74,999',
-                          '$75,000-99,999', '$100,000+')) +
   scale_y_continuous(labels = scales::dollar) +  
   theme(axis.text.x=element_text(size=10, angle=30, hjust=1, vjust=1)) +
   labs(title='Histogram of Loan Amount by Income Range',
@@ -317,45 +350,82 @@ ggplot(loans, aes(x=IncomeRange, y=LoanOriginalAmount)) +
 
 ### Prosper Rating by Income Range
 ```{r Prosper Rating by Income Range, echo=FALSE}
+
+
 loans %>%
   filter(ListingCreationDate.dt >= as.POSIXct('2009-07-01',
                                               tz='UTC',
                                               format='%Y-%m-%d')) %>%
 ggplot(., aes(x=IncomeRange)) +
-  geom_bar(aes(fill=ProsperRating..Alpha.)) +
-  scale_x_discrete(limits=c('Not displayed', 'Not employed', '$0', '$1-24,999',
-                          '$25,000-49,999', '$50,000-74,999',
-                          '$75,000-99,999', '$100,000+')) +
+  geom_bar(aes(fill=ProsperRatingAlpha), position='fill') +
+  scale_y_continuous(labels = scales::percent) +
   theme(axis.text.x=element_text(size=10, angle=30, hjust=1, vjust=1)) +
   scale_fill_viridis(discrete=TRUE, direction=-1) +
-  labs(title='Count of Prosper Ratings by Income Range',
+  labs(title='Percent of Prosper Ratings by Income Range',
        x='Income Range',
-       y='Count',
+       y='Percentage',
        fill='Prosper Rating')
+```
+
+```{r Proportion of Loan Amount by Reason by Income Level}
+
+# Filter excluding 'Not displayed' income range,
+# percent of spending by category for each individual income range
+
+loans %>%
+  filter(!(IncomeRange %in% 'Not displayed')) %>%
+  group_by(IncomeRange, ListingCategory) %>%
+  summarize(LoanAmountCat=sum(LoanOriginalAmount)) %>%
+  mutate(LoanAmountCatPct=LoanAmountCat/sum(LoanAmountCat)) %>%
+ggplot(., aes(x=IncomeRange, y=ListingCategory, fill=LoanAmountCatPct)) +
+  geom_tile(color='white') +
+  coord_fixed(ratio=.5) +
+  scale_fill_gradientn(colors=c(scales::muted('blue'), 'red'),
+                       label=scales::percent) +
+  theme(axis.text.x=element_text(size=10, angle=90, hjust=1, vjust=1)) +
+  labs(x='Income Range', y='Listing Category',
+       fill='Percent of Dollars',
+       title='Proportion of Loan Dollars for Listings by Income')
+```
+
+
+### Charge Off Rate by Prosper Rating
+```{r Charge Off Rate by Prosper Rating, echo=FALSE}
+loans %>%
+  filter(ListingCreationDate.dt >= as.POSIXct('2009-07-01',
+                                              tz='UTC',
+                                              format='%Y-%m-%d') &
+           LoanStatus %in% c('Completed', 'Chargedoff')) %>%
+ggplot(., aes(x=ProsperRatingAlpha)) +
+  geom_bar(aes(fill=LoanStatus), position='fill') +
+  scale_y_continuous(labels = scales::percent) +
+  theme(axis.text.x=element_text(size=10, angle=30, hjust=1, vjust=1)) +
+  scale_fill_brewer(palette='Spectral') +
+  labs(title='Charge Off Rate by Prosper Rating',
+       x='Prosper Rating',
+       y='Percentage',
+       fill='Loan Status')
+```
+
 
 ```
 
 
-### Default Rates by Prosper Rating
-```{r Default Rates by Rating, echo=FALSE}
+### Estimated Return of Mean Loan by Prosper Rating 
+```{r}
 loans %>%
-  mutate(month=format(ListingCreationDate.dt, '%m'),
-         year=format(ListingCreationDate.dt, '%Y'),
-         yearmonth=as.integer(format(ListingCreationDate.dt, '%Y%m'))) %>%
-  mutate(post200907 = ifelse(yearmonth>=200907, TRUE, FALSE)) %>%
-  group_by(post200907) %>%
-  summarize(n=n())
-
-loans %>%
-  mutate(month=format(ListingCreationDate.dt, '%m'),
-         year=format(ListingCreationDate.dt, '%Y'),
-         yearmonth=as.integer(format(ListingCreationDate.dt, '%Y%m'))) %>%
-  mutate(post200907 = ifelse(yearmonth>=200907, TRUE, FALSE)) %>%
-  group_by(yearmonth, ProsperScore) %>%
-  summarize(n=n())  
+  filter(ListingCreationDate.dt >= as.POSIXct('2009-07-01',
+                                              tz='UTC',
+                                              format='%Y-%m-%d')) %>%
+  mutate(EstimatedReturnDollars=EstimatedReturn*LoanOriginalAmount) %>%
+  group_by(ProsperRatingAlpha) %>%
+  summarize(MeanReturnDollars=mean(EstimatedReturnDollars),
+            MedianReturnDollars=median(EstimatedReturnDollars))
 
 
 ```
+
+
 
 # Bivariate Analysis
 
@@ -381,8 +451,28 @@ create here are justified by the plots you explored in the previous section. If
 you plan on creating any mathematical models, this is the section where you
 will do that.
 
-```{r echo=FALSE, Multivariate_Plots}
 
+### Debt to Income Ratio by Loan Status
+```{r}
+
+loans %>%
+  filter(!(LoanStatus %in% c('Cancelled', 'Completed', 'Chargedoff',
+                                     'Defaulted')) &
+           !is.na(ProsperRatingAlpha)) %>%
+  ggplot(., aes(x=LoanOriginalAmount, y=DebtToIncomeRatio)) +
+  geom_jitter(aes(color=ProsperRatingAlpha), width=1) +
+  scale_y_continuous(limits=c(0, 1.5)) +
+  scale_color_brewer(palette=2)
+
+```
+
+### Loan Amount by Number of Investors
+```{r}
+loans %>%
+  filter(ProsperRatingAlpha != '') %>%
+ggplot(., aes(x=LoanOriginalAmount, y=Investors)) +
+  geom_point(aes(color=ProsperRatingAlpha), alpha=0.8) +
+  scale_color_brewer(type='qual')
 ```
 
 # Multivariate Analysis
