@@ -42,8 +42,9 @@ loans <- rename(loans,
 ```
 
 Twenty-one values for ListingCategory are stored as integers 0 to 20. These are 
-converted to Factors with labels indicating their use.
-```{r Listing Category Factor, echo=TRUE}
+converted to Factors with labels indicating their use. Loan Terms are present in 
+three discrete values (12, 36, 60), so I will convert them as well.
+```{r Transform to Factor, echo=TRUE}
 # Transform ListingCategory to a Factor
 loans$ListingCategory <- factor(loans$ListingCategory..numeric.,
                                 labels = c("Not Available",
@@ -51,6 +52,9 @@ loans$ListingCategory <- factor(loans$ListingCategory..numeric.,
   "Student Use", "Auto", "Other", "Baby&Adoption", "Boat", "Cosmetic Procedure",
   "Engagement Ring", "Green Loans", "Household Expenses", "Large Purchases",
   "Medical/Dental", "Motorcycle", "RV", "Taxes", "Vacation", "Wedding Loans"))
+
+#Loan Terms to factors
+loans$Term.f <- factor(loans$Term)
 ```
 
 To facilitate plotting and filtering outlying Loan Amounts, a boolean is added
@@ -72,9 +76,11 @@ Handle ListingCreationDate as a POSIX datetime to simplify calculations.
 ```{r Listing Creation Date, echo=TRUE}
 loans$ListingCreationDate.dt <- as.POSIXct(loans$ListingCreationDate,
                                            format='%Y-%m-%d %H:%M:%S')
+
+june2009 <- as.POSIXct('2009-07-01', tz='UTC', format='%Y-%m-%d')
 ```
 
-Order Factors in logical order for display in plots.
+Order Factors logically for display in plots.
 ```{r Order Factors, echo=TRUE}
 # Order ProsperRating high to low
 loans$ProsperRatingAlpha <-
@@ -250,6 +256,24 @@ for one-third of all loans, and the top 10 loan amounts account for 61%.
 Loan amounts skew right, which is typical of a personal income distribution, and 
 I would expect loan amount to have a positive correlation with borrower income.
 
+### Defaults by Cycle
+```{r Dffaults by Cycle Histogram, echo=FALSE}
+ggplot(subset(loans, !is.na(LoanFirstDefaultedCycleNumber))) +
+  geom_histogram(aes(x=LoanFirstDefaultedCycleNumber, y=..count..),
+                 binwidth=1) +
+  labs(title='Number of Loans by First Defaulted Cycle',
+       x='First Defaulted Cycle',
+       y='Count')
+```
+#### Defaults by Cycle, Deciles
+```{r Defaults by Cycle, Deciles, echo=FALSE }
+quantile(loans$LoanFirstDefaultedCycleNumber, probs=seq(0,1,0.1), na.rm=TRUE)
+```
+
+Of loans that enter default, 40% do so within 12 billing cycles. 2.8% of defaults 
+occur in cycle 1. Cycle 8 is the single largest cycle for defaults, accounting
+for 5.7% of defaults. After cycle 8, the number of defaults gradually declines. 
+
 ### Median Loan Amount by State
 ```{r Median Loan Amount by State, echo=FALSE}
 
@@ -287,7 +311,7 @@ rm(us, avg_loan_by_state)
 
 I would expect that average loan amount and median income by state would be
 positively correlated. This is the case in some states, such as California,
-Texas,and much of the northeast, but does not hold true in many other areas.
+Texas, and much of the northeast, but does not hold true in many other areas.
 
 For instance, North Dakota has a relatively high median income, but
 comparatively low average loan value. Conversely, Louisiana has median income
@@ -299,42 +323,151 @@ this analysis, but it is an interesting map.
 Reference: [Census: Median household income, 2012-2016](https://www.census.gov/quickfacts/fact/map/US/INC110216)
 
 # Univariate Analysis
-For each plot above, I provided interesting findings about variables I explored. 
-Here, I discuss what I initially intend to explore further:
-- relationship between Prosper rating / score of creditworthiness and the \
-default rate 
-- reason for borrowing money against borrower income level; are reasons \
-consistent or varied?
-- loan amount vs. income
-
 The Prosper data set is well-structured with loan observations on each row and 
 many interesting variables in columns. There is enough information to determine 
 if data Prosper collects is sufficient to determine credit risk and how
 predictive Prosper's model is of repayment.
 
 I performed slight cleanup on the data to:
-- convert loan listing categories from numeric to string factors.
+- convert loan listing category and loan term from numeric to factors.
 - add informational boolean values to high and low loan value outliers.
 - simplify handling of datetimes.
 - simplify column names.
 
 Other than the above, I performed no adjustment to underlying data values.
 
+For each plot above, I provided interesting findings about the individual
+variables I explored. 
+Initially, I intend to explore a few relationships further:
+- relationship between Prosper rating / score of creditworthiness and the \
+default rate 
+- reason for borrowing money against borrower income level; are reasons \
+consistent or varied?
+- loan amount vs. income
 
 # Bivariate Plots
-
 ### Correlation Matrix
-```{r}
+```{r Correlation Matrix, echo=FALSE}
 loans %>%
   select(LoanOriginalAmount, Term, BorrowerAPR, EstimatedReturn,
          ProsperRatingNumeric, CreditScoreRangeUpper, RevolvingCreditBalance,
          AvailableBankcardCredit, DebtToIncomeRatio, BankcardUtilization,
          StatedMonthlyIncome, MonthlyLoanPayment, Recommendations,
-         Investors, PercentFunded, InvestmentFromFriendsCount,
-         InvestmentFromFriendsAmount) %>%
+         Investors, PercentFunded) %>%
   ggcorr(., layout.exp=4, hjust=.95, size=3) +
   labs(title='Correlation Matrix of Selected Variables')
 ```
+
+Before creating bivariate plots of the variables I found interesting through 
+univariate analysis, I decided to create a Pearson correlation matrix to uncover 
+potentially interesting relationships that might exist. Some relationships are 
+unsurprising, such as Prosper rating being positively correlated with credit
+score (higher is better in both cases) and negatively correlated with borrower 
+APR (better rated borrowers get lower rates). I will also explore why estimated
+returns are negatively correlated with loan amount and Prosper rating.
+
+### Charge Off Rate by Prosper Rating
+```{r Charge Off Rate by Prosper Rating, echo=FALSE}
+loans %>%
+  filter(ListingCreationDate.dt >= june2009 &
+           LoanStatus %in% c('Completed', 'Chargedoff')) %>%
+ggplot(., aes(x=ProsperRatingAlpha)) +
+  geom_bar(aes(fill=LoanStatus), position='fill') +
+  scale_y_continuous(labels = scales::percent) +
+  theme(axis.text.x=element_text(size=10, angle=30, hjust=1, vjust=1)) +
+  scale_fill_brewer(palette='Spectral') +
+  labs(title='Charge Off Rate by Prosper Rating',
+       x='Prosper Rating',
+       y='Percentage',
+       fill='Loan Status')
+```
+
+To validate my assumption that lower Prosper ratings have higher Charge Off rates,
+I plot the percentage of loans that have entered a final state of 'Completed' or 
+'Charged Off'. The result is as expected. Risk of charge off steadily increases 
+as rating decreases.
+
+### Borrower APR and Estimated Return
+```{r Estimated Returns, echo=FALSE}
+loans %>%
+  filter(ListingCreationDate.dt >= june2009) %>%
+ggplot(., aes(x=BorrowerAPR, y=EstimatedReturn)) +
+  geom_point() +
+  scale_x_continuous(labels=scales::percent) +
+  scale_y_continuous(labels=scales::percent) +
+  labs(title='Borrower APR relationship to Estimated Return',
+       x='Borrower APR',
+       y='Estimated Return')
+```
+
+Estimated returns are strongly positively correlated to borrower APR. APRs below
+20% have almost entirely positive estimated returns, while APRs above 20% have
+clusters of positive and negative estimated returns.
+
+The shape of this data leads me to hypothesize that the groupings are influenced 
+by another variable. I will further refine this plot in the multivariate section.
+
+### Estimated Returns by Prosper Rating
+```{r Percent Return, echo=FALSE}
+loans %>%
+  filter(ListingCreationDate.dt >= june2009) %>%
+  mutate(EstimatedReturnDollars=EstimatedReturn*LoanOriginalAmount) %>%
+  group_by(ProsperRatingAlpha) %>%
+ggplot(., aes(x=ProsperRatingAlpha, y=EstimatedReturn)) +
+  geom_boxplot() +
+  scale_y_continuous(labels = scales::percent) +  
+  theme(axis.text.x=element_text(size=10, angle=30, hjust=1, vjust=1)) +
+  labs(title='Estimated Percent Return by Prosper Rating',
+       x='Prosper Rating',
+       y='Estimated Return')
+
+```
+
+This corroborates the negative correlation between higher (better) Prosper rating 
+and estimated percent return. I suspect this will show up in the multivariate 
+plot of return, APR, and rating as discussed above. As we look at lower rating 
+tranches, median estimated return increases, estimated return shows wider variation,
+and among the highest risk ratings, downside risk increases substantially.
+
+```{r Dollar Return, echo=FALSE}
+loans %>%
+  filter(ListingCreationDate.dt >= june2009) %>%
+  mutate(EstimatedReturnDollars=EstimatedReturn*LoanOriginalAmount) %>%
+  group_by(ProsperRatingAlpha) %>%
+ggplot(., aes(x=ProsperRatingAlpha, y=EstimatedReturnDollars)) +
+  geom_boxplot() +
+  scale_y_continuous(labels = scales::dollar) +  
+  theme(axis.text.x=element_text(size=10, angle=30, hjust=1, vjust=1)) +
+  labs(title='Estimated Dollar Return by Prosper Rating',
+       x='Prosper Rating',
+       y='Estimated Return')
+
+```
+
+In dollar terms, the high risk tranche carries the most risk of negative returns. 
+B and C ratings have a good balance of highest return and risk. I expect the 
+lower dollar return to E and HR ratings are related to the loan amounts they are
+able to request.
+
+### Loan Amount by Prosper Rating
+```{r Loan Amount by Rating, echo=FALSE}
+loans %>%
+  filter(ListingCreationDate.dt >= june2009) %>%
+  group_by(ProsperRatingAlpha) %>%
+ggplot(., aes(x=ProsperRatingAlpha, y=LoanOriginalAmount)) +
+  geom_boxplot() +
+  scale_y_continuous(labels = scales::dollar) +  
+  theme(axis.text.x=element_text(size=10, angle=30, hjust=1, vjust=1)) +
+  labs(title='Loan Amount by Prosper Rating',
+       x='Prosper Rating',
+       y='Loan Amount')
+```
+
+E and HR rated borrowers have median loan amounts less than half that of AA-C 
+rated borrowers. The median loan amount and inter-quartile ranges
+of AA-C rated borrowers are all very similar. This makes sense because it is likely 
+they are borrowing money for reasons unrelated directly to their credit rating, 
+but a better credit rating enables better access to money.
 
 ### Loan Amount by Income Range
 ```{r Loan Amount by Income Range, echo=FALSE}
@@ -342,31 +475,16 @@ ggplot(loans, aes(x=IncomeRange, y=LoanOriginalAmount)) +
   geom_boxplot() +
   scale_y_continuous(labels = scales::dollar) +  
   theme(axis.text.x=element_text(size=10, angle=30, hjust=1, vjust=1)) +
-  labs(title='Histogram of Loan Amount by Income Range',
+  labs(title='Loan Amount by Income Range',
        x='Income Range',
        y='Loan Amount')
-
 ```
 
-### Prosper Rating by Income Range
-```{r Prosper Rating by Income Range, echo=FALSE}
+All income ranges took advantage of loans for the lowest amounts Prosper offers, 
+but only $100K+ earners borrowed the maximum amounts. Median loan amount increases 
+with income.
 
-
-loans %>%
-  filter(ListingCreationDate.dt >= as.POSIXct('2009-07-01',
-                                              tz='UTC',
-                                              format='%Y-%m-%d')) %>%
-ggplot(., aes(x=IncomeRange)) +
-  geom_bar(aes(fill=ProsperRatingAlpha), position='fill') +
-  scale_y_continuous(labels = scales::percent) +
-  theme(axis.text.x=element_text(size=10, angle=30, hjust=1, vjust=1)) +
-  scale_fill_viridis(discrete=TRUE, direction=-1) +
-  labs(title='Percent of Prosper Ratings by Income Range',
-       x='Income Range',
-       y='Percentage',
-       fill='Prosper Rating')
-```
-
+### Reason for Borrowing by Income
 ```{r Proportion of Loan Amount by Reason by Income Level}
 
 # Filter excluding 'Not displayed' income range,
@@ -385,47 +503,51 @@ ggplot(., aes(x=IncomeRange, y=ListingCategory, fill=LoanAmountCatPct)) +
   theme(axis.text.x=element_text(size=10, angle=90, hjust=1, vjust=1)) +
   labs(x='Income Range', y='Listing Category',
        fill='Percent of Dollars',
-       title='Proportion of Loan Dollars for Listings by Income')
+       title='Loan Dollars for Listings by Income')
 ```
 
+As shown above, higher earners borrow more money as a whole. Why do they borrow? 
+For each income range, the proportion of borrowing for each listing reason was
+calculated. The predominant reason for borrowing across all income ranges is 
+Debt Consolidation. All other reasons are near insignificant for each income range.
+Business borrowing is a second area revealed for borrowers with $0 stated income.
+This could be to start a business for someone with enough personal wealth to
+qualify for the loan.
 
-### Charge Off Rate by Prosper Rating
-```{r Charge Off Rate by Prosper Rating, echo=FALSE}
+### Prosper Rating by Income Range
+```{r Prosper Rating by Income Range, echo=FALSE}
 loans %>%
-  filter(ListingCreationDate.dt >= as.POSIXct('2009-07-01',
-                                              tz='UTC',
-                                              format='%Y-%m-%d') &
-           LoanStatus %in% c('Completed', 'Chargedoff')) %>%
-ggplot(., aes(x=ProsperRatingAlpha)) +
-  geom_bar(aes(fill=LoanStatus), position='fill') +
+  filter(ListingCreationDate.dt >= june2009) %>%
+ggplot(., aes(x=IncomeRange)) +
+  geom_bar(aes(fill=ProsperRatingAlpha), position='fill') +
   scale_y_continuous(labels = scales::percent) +
   theme(axis.text.x=element_text(size=10, angle=30, hjust=1, vjust=1)) +
-  scale_fill_brewer(palette='Spectral') +
-  labs(title='Charge Off Rate by Prosper Rating',
-       x='Prosper Rating',
+  scale_fill_viridis(discrete=TRUE, direction=-1) +
+  labs(title='Percent of Prosper Ratings by Income Range',
+       x='Income Range',
        y='Percentage',
-       fill='Loan Status')
+       fill='Prosper Rating')
 ```
 
+Higher incomes tend to have better ratings. The lowest rating levels quickly
+decrease with moderate income and the highest ratings expand. To me, this suggests 
+that people generally want to meet their credit obligations as measured by their 
+credit rating, and as they're able, they do.
 
+### Loan Amount by Term
+```{r Loan Amount by Term, echo=FALSE}
+ggplot(loans, aes(x=Term.f, y=LoanOriginalAmount)) +
+  geom_boxplot() +
+  scale_y_continuous(labels = scales::dollar) +  
+  theme(axis.text.x=element_text(size=10, angle=30, hjust=1, vjust=1)) +
+  labs(title='Loan Amount by Term',
+       x='Loan Term',
+       y='Loan Amount')
 ```
 
-
-### Estimated Return of Mean Loan by Prosper Rating 
-```{r}
-loans %>%
-  filter(ListingCreationDate.dt >= as.POSIXct('2009-07-01',
-                                              tz='UTC',
-                                              format='%Y-%m-%d')) %>%
-  mutate(EstimatedReturnDollars=EstimatedReturn*LoanOriginalAmount) %>%
-  group_by(ProsperRatingAlpha) %>%
-  summarize(MeanReturnDollars=mean(EstimatedReturnDollars),
-            MedianReturnDollars=median(EstimatedReturnDollars))
-
-
-```
-
-
+As expected, higher loan amounts are generally borrowed with longer repayment
+terms. I think this would be more interesting to explore with additional variables 
+to determine if there other influences, so I will include it in multivariate analysis.
 
 # Bivariate Analysis
 
@@ -443,14 +565,45 @@ the dataset?
 
 
 # Multivariate Plots Section
+### Borrowing Behavior
+```{r Borrowing Behavior, echo=FALSE}
+loans %>%
+  filter(!is.na(ProsperRatingAlpha) & ProsperRatingAlpha != '') %>%
+ggplot(., aes(x=ProsperRatingAlpha, y=LoanOriginalAmount)) +
+  geom_boxplot() +
+  scale_y_continuous(label=scales::dollar) +
+  coord_flip() +
+  facet_grid(. ~ Term.f) +
+  theme(axis.text.x=element_text(size=10, angle=30, hjust=1, vjust=1)) +
+  labs(title='Prosper Rating and Loan Amount Boxplot by Term Month',
+       x='Prosper Rating',
+       y='Loan Amount')
+```
+When compared to the bivariate analysis of Rating and Loan Amount above, we see 
+the same general trend of larger loan amount being borrowed for longer terms.
+Some additional characteristics of the data emerge:
+- High Risk borrowers have only 36-month terms. I'm unaware if this is due to a 
+Prosper credit rating policy or due to other general offer terms.
+- Borrowers across all risk groups borrowed similar amounts in 12-month terms.
+- AA, A, and B groups borrow similar median amounts across all terms.
 
-> **Tip**: Now it's time to put everything together. Based on what you found in
-the bivariate plots section, create a few multivariate plots to investigate
-more complex interactions between variables. Make sure that the plots that you
-create here are justified by the plots you explored in the previous section. If
-you plan on creating any mathematical models, this is the section where you
-will do that.
+### Estimated Return and APR by Rating and Loan Amount
+```{r Estimated Return and APR by Rating, echo=FALSE}
 
+loans %>%
+  filter(ListingCreationDate.dt >= june2009) %>%
+ggplot(., aes(x=BorrowerAPR, y=EstimatedReturn)) +
+  geom_point(aes(color=ProsperRatingAlpha, size=LoanOriginalAmount), alpha=0.05) +
+  guides(color = guide_legend(override.aes = list(alpha = 1))) +
+  scale_x_continuous(labels=scales::percent) +
+  scale_y_continuous(labels=scales::percent) +
+  scale_size_continuous(labels=scales::dollar) +
+  labs(title='Estimated Return and APR by Prosper Rating and Loan Amount',
+       x='Borrower APR',
+       y='Estimated Return',
+       color='Prosper Rating',
+       size='Loan Amount')
+```
 
 ### Debt to Income Ratio by Loan Status
 ```{r}
@@ -467,13 +620,29 @@ loans %>%
 ```
 
 ### Loan Amount by Number of Investors
+
 ```{r}
 loans %>%
   filter(ProsperRatingAlpha != '') %>%
-ggplot(., aes(x=LoanOriginalAmount, y=Investors)) +
-  geom_point(aes(color=ProsperRatingAlpha), alpha=0.8) +
-  scale_color_brewer(type='qual')
+  ggplot(., aes(x=LoanOriginalAmount, y=Investors, fill=ProsperRatingAlpha)) +
+  stat_bin_hex(aes(alpha=..count..), color='grey90', bins=50) +
+  scale_alpha(name='Count', range=c(0.2, 1)) +
+  scale_y_log10(breaks=scales::trans_breaks('log10', function(x) 10^x),
+                labels=scales::trans_format('log10', scales::math_format(10^.x)))
 ```
+
+```{r}
+loans %>%
+  filter(ProsperRatingAlpha != '') %>%
+  ggplot(., aes(x=LoanOriginalAmount, y=Investors)) +
+  geom_point(aes(color=ProsperRatingAlpha), alpha=0.05) +
+  guides(color = guide_legend(override.aes = list(alpha = 1))) +
+  scale_alpha(name='Count', range=c(0.05, 1)) +
+  scale_y_log10(breaks=scales::trans_breaks('log10', function(x) 10^x),
+                labels=scales::trans_format('log10', scales::math_format(10^.x)))
+```
+
+
 
 # Multivariate Analysis
 
